@@ -1,108 +1,93 @@
-# app.py
 import streamlit as st
-import os
 from openai import OpenAI
-from PyPDF2 import PdfReader
-import matplotlib.pyplot as plt
+import PyPDF2
+import os
 
-# Initialize OpenAI client using hidden API key
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# -----------------------------
+# Setup
+# -----------------------------
+st.set_page_config(page_title="Physics Student Bot", layout="wide")
+st.title("Physics Student Bot 📚")
 
-st.set_page_config(page_title="Physics Bot", layout="wide")
-st.title("📘 Physics Bot for Students")
+# Load OpenAI API key from secrets
+api_key = st.secrets["openai"]["api_key"]
+client = OpenAI(api_key=api_key)
 
+# -----------------------------
 # Upload PDF
-pdf_file = st.file_uploader("Upload your Physics book (PDF)", type="pdf")
-if pdf_file:
-    reader = PdfReader(pdf_file)
-    pages_text = [page.extract_text() for page in reader.pages]
-    num_pages = len(pages_text)
-    st.success(f"PDF loaded! {num_pages} pages detected.")
+# -----------------------------
+uploaded_file = st.file_uploader("Upload your Physics PDF", type=["pdf"])
+pdf_text = ""
 
-# Sidebar: Choose mode
-mode = st.sidebar.selectbox(
-    "Choose Bot Mode", 
-    ["Ask Question", "Summarize Chapter", "Generate Quiz"]
-)
+if uploaded_file:
+    pdf_reader = PyPDF2.PdfReader(uploaded_file)
+    for page in pdf_reader.pages:
+        pdf_text += page.extract_text() + "\n"
+    st.success(f"Loaded {len(pdf_reader.pages)} pages from {uploaded_file.name}.")
 
-# Helper function to create prompts
-def make_prompt(mode, user_input, pdf_text=None):
-    if mode == "Ask Question":
-        return f"""
-You are a Physics teaching assistant. Answer the student's question using the following book content:
-{''.join(pdf_text)}
+# -----------------------------
+# Bot Interaction
+# -----------------------------
+st.subheader("Ask your Physics questions")
 
-- Provide clear explanations
-- Solve equations if needed
-- Refer to page numbers if relevant
-- Use simple examples, graphs, or calculations to explain
+user_question = st.text_input("Type your question here:")
 
-Question: {user_input}
+if user_question and pdf_text:
+    prompt = f"""
+You are a Physics teacher AI. Use the following text from a book to answer the student's question carefully.
+Book content:
+{pdf_text}
+
+Student question:
+{user_question}
 """
-    elif mode == "Summarize Chapter":
-        return f"""
-Summarize the following chapter content in clear bullet points:
-{user_input}
-"""
-    elif mode == "Generate Quiz":
-        return f"""
-Create a 5-question quiz with answers based on the following content:
-{user_input}
-"""
-    else:
-        return user_input
 
-# Mode: Ask Question
-if mode == "Ask Question":
-    user_question = st.text_input("Ask a question about your Physics book:")
-    if st.button("Get Answer") and user_question:
-        if not pdf_file:
-            st.warning("Please upload a PDF first.")
-        else:
-            prompt = make_prompt(mode, user_question, pages_text)
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
-            )
-            answer = response.choices[0].message.content
-            st.markdown("### Answer:")
-            st.write(answer)
-
-# Mode: Summarize Chapter
-elif mode == "Summarize Chapter":
-    chapter_number = st.number_input("Enter chapter number to summarize", min_value=1, max_value=num_pages)
-    if st.button("Summarize"):
-        chapter_text = pages_text[chapter_number-1]
-        prompt = make_prompt(mode, chapter_text)
+    with st.spinner("Thinking..."):
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
         )
-        summary = response.choices[0].message.content
-        st.markdown("### Chapter Summary:")
+
+    answer = response.choices[0].message.content
+    st.markdown("**Answer:**")
+    st.write(answer)
+
+# -----------------------------
+# Generate Summary
+# -----------------------------
+if uploaded_file:
+    if st.button("Generate Book Summary"):
+        prompt_summary = f"""
+You are a Physics teacher AI. Summarize the following book content in clear bullet points:
+{pdf_text}
+"""
+        with st.spinner("Generating summary..."):
+            response_summary = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt_summary}],
+                temperature=0.7
+            )
+        summary = response_summary.choices[0].message.content
+        st.markdown("**Summary:**")
         st.write(summary)
 
-# Mode: Generate Quiz
-elif mode == "Generate Quiz":
-    chapter_number = st.number_input("Enter chapter number for quiz", min_value=1, max_value=num_pages)
-    if st.button("Generate Quiz"):
-        chapter_text = pages_text[chapter_number-1]
-        prompt = make_prompt(mode, chapter_text)
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-        )
-        quiz = response.choices[0].message.content
-        st.markdown("### Quiz:")
+# -----------------------------
+# Generate Quiz
+# -----------------------------
+if uploaded_file:
+    if st.button("Generate a Quiz"):
+        prompt_quiz = f"""
+You are a Physics teacher AI. Based on the following text, create a short quiz of 5 questions with answers.
+Book content:
+{pdf_text}
+"""
+        with st.spinner("Generating quiz..."):
+            response_quiz = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt_quiz}],
+                temperature=0.7
+            )
+        quiz = response_quiz.choices[0].message.content
+        st.markdown("**Quiz:**")
         st.write(quiz)
-
-# Example graph for visual explanation
-st.subheader("Example Graph: y = x^2")
-x = list(range(0, 11))
-y = [i**2 for i in x]
-fig, ax = plt.subplots()
-ax.plot(x, y)
-ax.set_xlabel("x")
-ax.set_ylabel("y")
-ax.set_title("y = x^2")
-st.pyplot(fig)
